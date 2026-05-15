@@ -91,6 +91,7 @@ def get_or_create_rating(db, user_id: str, activity_name: str, city: str, catego
     return rating
 
 # --- ELO endpoints ---
+#heeh
 
 class MatchupResult(BaseModel):
     user_id: str
