@@ -891,6 +891,119 @@ def get_route(places: str, mode: str = "walking", city: str = ""):
     except Exception as e:
         print(f"Route error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+    
+# ---- AI Travel Agent ----
+
+class AgentMessage(BaseModel):
+    role: str
+    content: str
+
+class AgentRequest(BaseModel):
+    messages: list[AgentMessage]
+
+@app.post("/agent")
+async def travel_agent(req: AgentRequest):
+    try:
+        # Build conversation for Groq
+        messages = [{"role": m.role, "content": m.content} for m in req.messages]
+        
+        system_prompt = """You are Globr's AI travel agent. Your goal is to find the perfect travel destination for the user.
+
+Have a natural conversation — ask about:
+- Their hometown/location (to gauge distance)
+- Travel style (adventure, relaxation, culture, food, nightlife)
+- Budget (budget, mid-range, luxury)
+- Who they're traveling with (solo, couple, family, friends)
+- Season/timing
+- Trip duration
+- Any places they've loved or hated before
+
+After 4-6 messages when you have enough info, respond with ONLY this JSON (no other text):
+{"ready": true, "hometown": "city", "season": "season", "duration": "duration", "distance": "nearby|domestic|international|anywhere", "style": "description of their travel style and preferences"}
+
+Keep responses SHORT (1-2 sentences max). Be friendly and conversational. Ask ONE question at a time."""
+
+        r = requests.post(
+            "https://api.groq.com/openai/v1/chat/completions",
+            headers={"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"},
+            json={
+                "model": "llama-3.1-8b-instant",
+                "max_tokens": 500,
+                "messages": [{"role": "system", "content": system_prompt}] + messages
+            }
+        )
+        r.raise_for_status()
+        response_text = r.json()["choices"][0]["message"]["content"].strip()
+
+        # Check if agent is ready to search
+        try:
+            parsed = json.loads(response_text)
+            if parsed.get("ready"):
+                # Agent has enough info — get destinations
+                destinations = await get_agent_destinations(
+                    hometown=parsed.get("hometown", ""),
+                    distance=parsed.get("distance", "anywhere"),
+                    season=parsed.get("season", "Flexible"),
+                    duration=parsed.get("duration", ""),
+                    style=parsed.get("style", "")
+                )
+                return {
+                    "type": "destinations",
+                    "message": "Based on everything you told me, here are your perfect picks ✦",
+                    "destinations": destinations
+                }
+        except (json.JSONDecodeError, ValueError):
+            pass
+
+        return {"type": "message", "message": response_text}
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+async def get_agent_destinations(hometown: str, distance: str, season: str, duration: str, style: str):
+    prompt = f"""You are a world-class travel advisor. Recommend exactly 5 travel destinations.
+
+User profile:
+- Based in: {hometown}
+- Distance preference: {distance}
+- Season: {season}
+- Duration: {duration}
+- Travel style: {style}
+
+Distance constraints:
+- nearby: within 2-hour drive/train from {hometown}
+- domestic: same country as {hometown}
+- international: outside {hometown}'s country
+- anywhere: anywhere in the world
+
+You MUST respond with ONLY a raw JSON array. No markdown, no explanation.
+Example: [{{"city":"Paris","country":"France","weather":"Mild, 55F","reason":"Perfect for food lovers in spring."}}]
+
+Give 5 destinations perfectly matched to their style:"""
+
+    try:
+        r = requests.post(
+            "https://api.groq.com/openai/v1/chat/completions",
+            headers={"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"},
+            json={
+                "model": "llama-3.1-8b-instant",
+                "max_tokens": 600,
+                "messages": [{"role": "user", "content": prompt}]
+            }
+        )
+        r.raise_for_status()
+        raw = r.json()["choices"][0]["message"]["content"].strip()
+        raw = re.sub(r'^```(?:json)?\s*', '', raw, flags=re.MULTILINE)
+        raw = re.sub(r'\s*```$', '', raw, flags=re.MULTILINE)
+        start = raw.find('[')
+        end = raw.rfind(']')
+        if start != -1 and end != -1:
+            raw = raw[start:end+1]
+        return json.loads(raw)[:5]
+    except Exception as e:
+        print(f"Agent destinations error: {e}")
+        return []
 
 
 if __name__ == "__main__":
