@@ -17,12 +17,11 @@ load_dotenv()
 init_db()
 
 app = FastAPI()
-
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["https://travel-app-murex-kappa.vercel.app/"],
-    allow_methods=["https://travel-app-murex-kappa.vercel.app/"],
-    allow_headers=["https://travel-app-murex-kappa.vercel.app/"],
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 GOOGLE_API_KEY = os.getenv("GOOGLE_PLACES_API_KEY")
