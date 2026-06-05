@@ -8,6 +8,20 @@ load_dotenv()
 
 DATABASE_URL = os.getenv("DATABASE_URL")
 
+if not DATABASE_URL:
+    # Railway sometimes exposes the Postgres URL under a different key.
+    DATABASE_URL = os.getenv("DATABASE_PUBLIC_URL") or os.getenv("POSTGRES_URL")
+
+if not DATABASE_URL:
+    raise RuntimeError(
+        "DATABASE_URL is not set. In Railway, link your Postgres service to this "
+        "service (Variables tab) so DATABASE_URL is provided."
+    )
+
+# SQLAlchemy needs the 'postgresql://' scheme, not the older 'postgres://'
+if DATABASE_URL.startswith("postgres://"):
+    DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
+
 engine = create_engine(DATABASE_URL)
 SessionLocal = sessionmaker(bind=engine)
 Base = declarative_base()
@@ -27,7 +41,7 @@ class PostedRanking(Base):
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, index=True)
     city = Column(String)
-    trip_id = Column(Integer, nullable=True)
+    trip_id = Column(String, nullable=True)
     items_json = Column(String)   # JSON list of {name, score, matches}
     created_at = Column(String, nullable=True)
 

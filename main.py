@@ -1,6 +1,6 @@
 from fastapi import FastAPI, HTTPException, Depends
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 import requests
 import os
 import re
@@ -167,8 +167,13 @@ def set_username(req: UsernameRequest, user: User = Depends(require_user)):
 
 class PostRankingRequest(BaseModel):
     city: str
-    trip_id: Optional[int] = None
+    trip_id: Optional[str] = None
     items: list   # [{"name":..., "score":..., "matches":...}]
+
+    @field_validator("trip_id", mode="before")
+    @classmethod
+    def _coerce_trip_id(cls, v):
+        return None if v is None else str(v)
 
 @app.post("/rankings/post")
 def post_ranking(req: PostRankingRequest, user: User = Depends(require_user)):
@@ -808,7 +813,12 @@ class MatchupResult(BaseModel):
     winner_name: str
     loser_name: str
     city: str
-    category: str
+    category: str = "tourist_attraction"
+
+    @field_validator("user_id", mode="before")
+    @classmethod
+    def _coerce_user_id(cls, v):
+        return str(v)
 
 @app.post("/matchup")
 def record_matchup(result: MatchupResult):
