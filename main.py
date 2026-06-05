@@ -825,6 +825,63 @@ def agent_chat(req: AgentChatRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+# ---- AI Budget Advisor (conversational) ----
+
+class BudgetChatRequest(BaseModel):
+    destination: str = ""
+    duration_days: int = 0
+    dates: str = ""
+    categories: list = []   # ["Food", "Hotel", "Activities", "Transit", ...]
+    messages: list = []     # [{"role": "user"|"assistant", "content": "..."}]
+
+@app.post("/agent/budget")
+def agent_budget(req: BudgetChatRequest):
+    cats = req.categories or ["Food", "Hotel", "Activities", "Transit"]
+    cats_str = ", ".join(cats)
+    trip_facts = (
+        f"Destination: {req.destination or 'unknown'}. "
+        f"Trip length: {req.duration_days or 'unknown'} days. "
+        f"Dates: {req.dates or 'unknown'}."
+    )
+    system_prompt = (
+        "You are Globr's friendly budget advisor for people who don't know how to plan a trip. "
+        "Your job is to recommend a realistic total budget broken down by category, using real "
+        "cost-of-living knowledge for the destination (prices vary a lot by city and season).\n\n"
+        f"Here is what we already know about the trip: {trip_facts}\n\n"
+        f"The budget categories to fill are: {cats_str}.\n\n"
+        "Have a SHORT, warm conversation (1-2 sentences per reply, ONE question at a time). "
+        "Ask only what you still need to give a good estimate — usually travel style "
+        "(budget / mid-range / luxury) and how many people are traveling. Do NOT re-ask the "
+        "destination or dates; you already have them.\n\n"
+        "Once you have enough (after 1-3 quick questions), respond with ONLY a raw JSON object "
+        "and nothing else. Recommend a whole-trip total (in USD) for EACH category, grounded in "
+        "real costs for that destination and length of stay:\n"
+        '{"ready": true, "recommendations": {"<category>": <number>, ...}, '
+        '"note": "<one friendly sentence explaining the estimate>"}\n\n'
+        "Use the exact category names given. Numbers only (no $ signs or text). "
+        "Until you are ready, just chat normally (no JSON)."
+    )
+
+    groq_messages = [{"role": "system", "content": system_prompt}]
+    for m in req.messages:
+        role = m.get("role")
+        if role in ("user", "assistant"):
+            groq_messages.append({"role": role, "content": m.get("content", "")})
+
+    try:
+        r = requests.post(
+            "https://api.groq.com/openai/v1/chat/completions",
+            headers={"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"},
+            json={"model": "llama-3.1-8b-instant", "max_tokens": 500, "messages": groq_messages},
+        )
+        r.raise_for_status()
+        reply = r.json()["choices"][0]["message"]["content"].strip()
+        return {"reply": reply}
+    except Exception as e:
+        print(f"Budget advisor error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 # ---- Destination Suggestions ----
 
 @app.get("/destinations")
