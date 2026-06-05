@@ -9,7 +9,7 @@ import hashlib
 import secrets
 from datetime import datetime
 from dotenv import load_dotenv
-from models import SessionLocal, ActivityRating, init_db, User, UserTrip, UserSavedPlace, TripShare
+from models import SessionLocal, ActivityRating, init_db, User, UserTrip, UserSavedPlace, TripShare, PostedRanking
 from fastapi.middleware.cors import CORSMiddleware
 from typing import Optional
 
@@ -105,7 +105,7 @@ def register(req: RegisterRequest):
         db.commit()
         return {
             "token": user.session_token,
-            "user": {"id": user.id, "email": user.email, "name": user.name}
+            "user": {"id": user.id, "email": user.email, "name": user.name, "username": user.username}
         }
     finally:
         db.close()
@@ -121,7 +121,7 @@ def login(req: LoginRequest):
         db.commit()
         return {
             "token": user.session_token,
-            "user": {"id": user.id, "email": user.email, "name": user.name}
+            "user": {"id": user.id, "email": user.email, "name": user.name, "username": user.username}
         }
     finally:
         db.close()
@@ -140,7 +140,74 @@ def logout(user: User = Depends(require_user)):
 
 @app.get("/auth/me")
 def me(user: User = Depends(require_user)):
-    return {"id": user.id, "email": user.email, "name": user.name}
+    return {"id": user.id, "email": user.email, "name": user.name, "username": user.username}
+
+
+# ---- Public profiles, usernames & posted rankings ----
+
+class UsernameRequest(BaseModel):
+    username: str
+
+@app.put("/auth/username")
+def set_username(req: UsernameRequest, user: User = Depends(require_user)):
+    handle = (req.username or "").strip().lower().lstrip("@")
+    if not re.match(r'^[a-z0-9_]{3,20}$', handle):
+        raise HTTPException(status_code=400, detail="Username must be 3-20 chars: letters, numbers, underscores.")
+    db = SessionLocal()
+    try:
+        taken = db.query(User).filter(User.username == handle, User.id != user.id).first()
+        if taken:
+            raise HTTPException(status_code=400, detail="That username is taken.")
+        u = db.query(User).filter_by(id=user.id).first()
+        u.username = handle
+        db.commit()
+        return {"username": handle}
+    finally:
+        db.close()
+
+class PostRankingRequest(BaseModel):
+    city: str
+    trip_id: Optional[int] = None
+    items: list   # [{"name":..., "score":..., "matches":...}]
+
+@app.post("/rankings/post")
+def post_ranking(req: PostRankingRequest, user: User = Depends(require_user)):
+    db = SessionLocal()
+    try:
+        u = db.query(User).filter_by(id=user.id).first()
+        if not u.username:
+            raise HTTPException(status_code=400, detail="Set a username before posting.")
+        # Replace any existing posted ranking for this city (one per user+city)
+        db.query(PostedRanking).filter_by(user_id=user.id, city=req.city).delete()
+        pr = PostedRanking(
+            user_id=user.id, city=req.city, trip_id=req.trip_id,
+            items_json=json.dumps(req.items), created_at=datetime.utcnow().isoformat(),
+        )
+        db.add(pr)
+        db.commit()
+        return {"ok": True}
+    finally:
+        db.close()
+
+@app.get("/profile/{username}")
+def get_profile(username: str):
+    handle = username.strip().lower().lstrip("@")
+    db = SessionLocal()
+    try:
+        u = db.query(User).filter_by(username=handle).first()
+        if not u:
+            raise HTTPException(status_code=404, detail="Profile not found.")
+        posts = db.query(PostedRanking).filter_by(user_id=u.id).order_by(PostedRanking.created_at.desc()).all()
+        return {
+            "username": u.username,
+            "name": u.name,
+            "rankings": [
+                {"city": p.city, "items": json.loads(p.items_json or "[]"), "created_at": p.created_at}
+                for p in posts
+            ],
+        }
+    finally:
+        db.close()
 
 
 # ---- Saved Places (per user) ----

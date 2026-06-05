@@ -6,11 +6,9 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./globr.db")
+DATABASE_URL = os.getenv("DATABASE_URL")
 
-engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False} if "sqlite" in DATABASE_URL else {})
-
-
+engine = create_engine(DATABASE_URL)
 SessionLocal = sessionmaker(bind=engine)
 Base = declarative_base()
 
@@ -19,8 +17,18 @@ class User(Base):
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String)
     email = Column(String, unique=True, index=True)
+    username = Column(String, unique=True, index=True, nullable=True)
     password_hash = Column(String)
     session_token = Column(String, nullable=True)
+    created_at = Column(String, nullable=True)
+
+class PostedRanking(Base):
+    __tablename__ = "posted_rankings"
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, index=True)
+    city = Column(String)
+    trip_id = Column(Integer, nullable=True)
+    items_json = Column(String)   # JSON list of {name, score, matches}
     created_at = Column(String, nullable=True)
 
 class UserTrip(Base):
